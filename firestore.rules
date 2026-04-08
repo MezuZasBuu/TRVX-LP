@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional, uri format)
+    //   - location: string (optional)
+    //   - address: string (optional)
+    //   - membershipTier: string (required, enum: ['free', 'standard', 'pro', 'ultimate'])
+    //   - usage: map (optional)
+    //     - queriesCount: number
+    //     - missionsCount: number
+    //     - lastReset: string (date-time)
+    //   - createdAt: string (date-time)
+    //   - updatedAt: string (date-time)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "mezuai000@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'membershipTier']) &&
+             data.uid is string &&
+             isValidEmail(data.email) &&
+             data.membershipTier in ['free', 'standard', 'pro', 'ultimate'] &&
+             (!('location' in data) || (data.location is string && data.location.size() < 100)) &&
+             (!('address' in data) || (data.address is string && data.address.size() < 200));
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.email == resource.data.email;
+      allow delete: if isAdmin();
+    }
+  }
+}
